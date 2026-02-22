@@ -65,7 +65,7 @@ class MyModel:
             test_data[i] = test_data[i][:index]
             
         # write correct next char to file for evaluation
-        with open('correct_next_char.txt', 'wt') as f:
+        with open('output/correct_next_char.txt', 'wt') as f:
             for c in correct_next_char:
                 f.write('{}\n'.format(c))
         return test_data
@@ -194,6 +194,10 @@ class MyModel:
                     rand_char = random.choice(item)
                     while rand_char in output_chars:
                         rand_char = random.choice(item)
+                        # if there are no new characters to choose from, choose random ones
+                        if len(set(item) - set(output_chars)) == 0:
+                            rand_char = random.choice('abcdefghijklmnopqrstuvwxyz .!?')
+                            break
                     output_chars += rand_char
                     LOGGER.warning(f"Empty char_scores for prefix '{item}'. Appending random character '{rand_char}' from input.")
                     continue
