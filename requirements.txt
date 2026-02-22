@@ -1,5 +1,4 @@
-trl
 datasets
-torch
 transformers
 wandb
+tqdm

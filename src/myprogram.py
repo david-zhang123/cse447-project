@@ -5,17 +5,22 @@ import random
 # import torch.nn as nn
 # from torch.utils.data import DataLoader
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from lstm import CharDataset, SimpleLSTM
+# from lstm import CharDataset, SimpleLSTM
 from collections import defaultdict, Counter
 from tqdm import tqdm
 from datasets import load_dataset
+import logging
 
 # Set seed for reproducibility
 random.seed(0)
 # torch.manual_seed(0)
 
+# define logger
+LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class MyModel:
-    def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None):
+    def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None, lowercase=True):
         # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Hyperparameters for lstm
@@ -33,6 +38,7 @@ class MyModel:
         # else:
         #     self.model = None
 
+        self.lowercase = lowercase
         self.word_language_map = {}
         self.language_pref_count = {}
 
@@ -42,21 +48,22 @@ class MyModel:
         return load_dataset("papluca/language-identification", split="train")
 
     @classmethod
-    def load_test_data(cls, fname):
-        # data = []
-        # with open(fname) as f:
-        #     for line in f:
-        #         inp = line[:-1]  # remove newline
-        #         data.append(inp)
-        # return data
-
-        test_data = load_dataset("papluca/language-identification", split="test")['text']
+    def load_test_data(cls, fname, lowercase=True):
+        test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
         correct_next_char = []
         for i in range(len(test_data)):
-            # randomly choose point to strip context to
-            index = random.randint(1, len(test_data[i]) - 2)
-            test_data[i] = test_data[i].strip()[:index]
-            correct_next_char.append(test_data[i][index])
+            # Convert to lowercase if toggle is enabled
+            test_data[i] = test_data[i].strip()
+            if lowercase:
+                test_data[i] = test_data[i].lower()
+            if len(test_data[i]) < 2:
+                continue
+            index = random.randint(1, len(test_data[i]) - 1)
+            # next character is correct_next_char
+            correct_next_char.append(test_data[i][index]) 
+            # strip context to right before correct next char
+            test_data[i] = test_data[i][:index]
+            
         # write correct next char to file for evaluation
         with open('correct_next_char.txt', 'wt') as f:
             for c in correct_next_char:
@@ -75,6 +82,8 @@ class MyModel:
         for item in tqdm(text):
             lang = item['labels']   
             cur_text = item['text']
+            if self.lowercase:
+                cur_text = cur_text.lower()
             words = cur_text.split()
             for w in words:
                 if w not in self.word_language_map:
@@ -137,6 +146,8 @@ class MyModel:
                     count = int(count)
                     langs.extend([lang] * count)
                 model.word_language_map[word] = langs
+        # print head to confirm load
+        print("Loaded model with {} words in word_language_map and {} languages in language_pref_count".format(len(model.word_language_map), len(model.language_pref_count)))
 
         return model
 
@@ -145,7 +156,11 @@ class MyModel:
         for item in tqdm(data):
             output_chars = ""
 
+            # Convert input data to lowercase if toggle is enabled
             context_words = item.split()
+            if self.lowercase:
+                context_words = [word.lower() for word in context_words]
+
             if context_words[-1] in self.word_language_map:
                 # could be a space since a valid word
                 output_chars += " "
@@ -161,16 +176,27 @@ class MyModel:
             
             # based on likelihood of languages, average likelihood of next char across prefixes
             prefix = context_words[-1]
+            total_lang_count = sum(lang_dist.values())
             char_scores = Counter()
             for lang, lang_count in lang_dist.items():
                 if prefix in self.language_pref_count[lang]:
                     prefix_count = self.language_pref_count[lang][prefix]
-                    for char, char_count in self.language_pref_count[lang].items():
-                        if char.startswith(prefix) and len(char) > len(prefix):
-                            char_scores[char[len(prefix)]] += (char_count / prefix_count) * lang_count
-
+                    # Iterate over all words in the language
+                    for word, char_count in self.language_pref_count[lang].items():
+                        if word.startswith(prefix) and len(word) == len(prefix) + 1:
+                            next_char = word[len(prefix)]
+                            char_scores[next_char] += prefix_count * char_count * lang_count / total_lang_count
             # choose char with highest scores until output_chars is length 3, we want 3 total predictions for the same next char
             while len(output_chars) < 3:
+                if not char_scores:
+                    # Handle empty char_scores by appending random character from item
+                    # that is not already in output_chars
+                    rand_char = random.choice(item)
+                    while rand_char in output_chars:
+                        rand_char = random.choice(item)
+                    output_chars += rand_char
+                    LOGGER.warning(f"Empty char_scores for prefix '{item}'. Appending random character '{rand_char}' from input.")
+                    continue
                 next_char = char_scores.most_common(1)[0][0]
                 output_chars += next_char
                 del char_scores[next_char]
