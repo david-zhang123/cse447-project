@@ -19,7 +19,7 @@ random.seed(0)
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# https://huggingface.co/datasets/cc100
+# https://huggingface.co/datasets/SEACrowd/cc100
 CC100_LANGUAGES = [
     "af", "am", "ar", "as", "az", "be", "bg", "bn", "br", "bs",
     "ca", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et",
