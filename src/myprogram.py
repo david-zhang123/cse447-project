@@ -19,6 +19,29 @@ random.seed(0)
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# https://huggingface.co/datasets/cc100
+CC100_LANGUAGES = [
+    "af", "am", "ar", "as", "az", "be", "bg", "bn", "br", "bs",
+    "ca", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et",
+    "eu", "fa", "ff", "fi", "fr", "fy", "ga", "gd", "gl", "gn",
+    "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig",
+    "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "ku",
+    "ky", "la", "lg", "li", "ln", "lo", "lt", "lv", "mg", "mk",
+    "ml", "mn", "mr", "ms", "my", "ne", "nl", "no", "ns", "om",
+    "or", "pa", "pl", "ps", "pt", "qu", "rm", "ro", "ru", "sa",
+    "si", "sk", "sl", "so", "sq", "sr", "ss", "su", "sv", "sw",
+    "ta", "te", "th", "tl", "tn", "tr", "ug", "uk", "ur", "uz",
+    "vi", "wo", "xh", "yi", "yo", "zh", "zu",
+]
+
+# Expand as needed
+DEFAULT_LANGUAGES = [
+    "en", "es", "fr", "de", "it", "pt", "nl", "ru", "zh", "ja",
+    "ko", "ar", "hi", "bn", "tr", "pl", "vi", "th", "sv", "fi",
+    "cs", "ro", "hu", "el", "he", "id", "ms", "uk", "fa", "ta",
+    "te", "ml", "ka", "sw", "af", "ur", "sr", "hr", "bg", "sk",
+]
+
 class MyModel:
     def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None, lowercase=True):
         # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -43,28 +66,84 @@ class MyModel:
         self.language_pref_count = {}
 
     @classmethod
-    def load_training_data(cls):
-        # load amazon reviews database from huggingface
-        return load_dataset("papluca/language-identification", split="train")
+    def load_training_data(cls, languages=None, max_samples_per_lang=5000):
+        # load CC-100 multilingual web crawl data from huggingface
+        # streams per-language to avoid downloading terabytes
+        if languages is None:
+            languages = DEFAULT_LANGUAGES
+
+        data = []
+        for lang in tqdm(languages, desc="Loading languages"):
+            try:
+                ds = load_dataset(
+                    "cc100",
+                    lang=lang,
+                    split="train",
+                    streaming=True,
+                    trust_remote_code=True,
+                )
+                count = 0
+                for item in ds:
+                    text = item["text"].strip()
+                    if len(text) < 5:
+                        continue
+                    data.append({"text": text, "labels": lang})
+                    count += 1
+                    if count >= max_samples_per_lang:
+                        break
+                LOGGER.info(f"Loaded {count} samples for language '{lang}'")
+            except Exception as e:
+                LOGGER.warning(f"Could not load language '{lang}': {e}")
+        random.shuffle(data)
+        LOGGER.info(f"Total training samples: {len(data)}")
+        return data
 
     @classmethod
     def load_test_data(cls, fname, lowercase=True):
-        test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
+        # load test data from CC-100 (held-out slice)
+        test_languages = DEFAULT_LANGUAGES[:10]
+        raw_texts = []
+        for lang in test_languages:
+            try:
+                ds = load_dataset(
+                    "cc100",
+                    lang=lang,
+                    split="train",
+                    streaming=True,
+                    trust_remote_code=True,
+                )
+                count = 0
+                for item in ds:
+                    text = item["text"].strip()
+                    if len(text) < 10:
+                        continue
+                    raw_texts.append(text)
+                    count += 1
+                    if count >= 100:
+                        break
+            except Exception:
+                pass
+
+        # skip some samples to avoid overlap with training data
+        raw_texts = raw_texts[500:] if len(raw_texts) > 600 else raw_texts[len(raw_texts)//2:]
+
+        test_data = []
         correct_next_char = []
-        for i in range(len(test_data)):
+        for i in range(len(raw_texts)):
             # Convert to lowercase if toggle is enabled
-            test_data[i] = test_data[i].strip()
+            raw_texts[i] = raw_texts[i].strip()
             if lowercase:
-                test_data[i] = test_data[i].lower()
-            if len(test_data[i]) < 2:
+                raw_texts[i] = raw_texts[i].lower()
+            if len(raw_texts[i]) < 2:
                 continue
-            index = random.randint(1, len(test_data[i]) - 1)
+            index = random.randint(1, len(raw_texts[i]) - 1)
             # next character is correct_next_char
-            correct_next_char.append(test_data[i][index]) 
+            correct_next_char.append(raw_texts[i][index]) 
             # strip context to right before correct next char
-            test_data[i] = test_data[i][:index]
+            test_data.append(raw_texts[i][:index])
             
         # write correct next char to file for evaluation
+        os.makedirs('output', exist_ok=True)
         with open('output/correct_next_char.txt', 'wt') as f:
             for c in correct_next_char:
                 f.write('{}\n'.format(c))
@@ -78,7 +157,7 @@ class MyModel:
                 f.write('{}\n'.format(p))
 
     def run_train(self, text, work_dir):
-        # loop through the huggingface dataset text
+        # loop through the training data text
         for item in tqdm(text):
             lang = item['labels']   
             cur_text = item['text']
@@ -179,7 +258,7 @@ class MyModel:
             total_lang_count = sum(lang_dist.values())
             char_scores = Counter()
             for lang, lang_count in lang_dist.items():
-                if prefix in self.language_pref_count[lang]:
+                if lang in self.language_pref_count and prefix in self.language_pref_count[lang]:
                     prefix_count = self.language_pref_count[lang][prefix]
                     # Iterate over all words in the language
                     for word, char_count in self.language_pref_count[lang].items():
@@ -213,6 +292,10 @@ if __name__ == '__main__':
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
     parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
+    parser.add_argument('--languages', nargs='+', default=None,
+                        help='ISO 639-1 language codes to train on (default: 40 common languages)')
+    parser.add_argument('--max_samples', type=int, default=5000,
+                        help='max training samples per language')
     args = parser.parse_args()
 
     if args.mode == 'train':
@@ -221,8 +304,11 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
         print('Instantiating model')
         model = MyModel()
-        print('Loading training data')
-        train_data = MyModel.load_training_data()
+        print('Loading training data from CC-100')
+        train_data = MyModel.load_training_data(
+            languages=args.languages,
+            max_samples_per_lang=args.max_samples,
+        )
         print('Training')
         model.run_train(train_data, args.work_dir)
         print('Saving model')
