@@ -19,22 +19,6 @@ random.seed(0)
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# https://huggingface.co/datasets/SEACrowd/cc100
-CC100_LANGUAGES = [
-    "af", "am", "ar", "as", "az", "be", "bg", "bn", "br", "bs",
-    "ca", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et",
-    "eu", "fa", "ff", "fi", "fr", "fy", "ga", "gd", "gl", "gn",
-    "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig",
-    "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "ku",
-    "ky", "la", "lg", "li", "ln", "lo", "lt", "lv", "mg", "mk",
-    "ml", "mn", "mr", "ms", "my", "ne", "nl", "no", "ns", "om",
-    "or", "pa", "pl", "ps", "pt", "qu", "rm", "ro", "ru", "sa",
-    "si", "sk", "sl", "so", "sq", "sr", "ss", "su", "sv", "sw",
-    "ta", "te", "th", "tl", "tn", "tr", "ug", "uk", "ur", "uz",
-    "vi", "wo", "xh", "yi", "yo", "zh", "zu",
-]
-
-# Expand as needed
 DEFAULT_LANGUAGES = [
     "en", "es", "fr", "de", "it", "pt", "nl", "ru", "zh", "ja",
     "ko", "ar", "hi", "bn", "tr", "pl", "vi", "th", "sv", "fi",
@@ -67,21 +51,13 @@ class MyModel:
 
     @classmethod
     def load_training_data(cls, languages=None, max_samples_per_lang=5000):
-        # load CC-100 multilingual web crawl data from huggingface
-        # streams per-language to avoid downloading terabytes
         if languages is None:
             languages = DEFAULT_LANGUAGES
 
         data = []
         for lang in tqdm(languages, desc="Loading languages"):
             try:
-                ds = load_dataset(
-                    "cc100",
-                    lang=lang,
-                    split="train",
-                    streaming=True,
-                    trust_remote_code=True,
-                )
+                ds = load_dataset("wikimedia/wikipedia", f"20231101.{lang}", split="train", streaming=True)
                 count = 0
                 for item in ds:
                     text = item["text"].strip()
@@ -100,59 +76,19 @@ class MyModel:
 
     @classmethod
     def load_test_data(cls, fname, lowercase=True):
-        # load test data from CC-100 (held-out slice)
-        test_languages = DEFAULT_LANGUAGES[:10]
-        raw_texts = []
-        for lang in test_languages:
-            try:
-                ds = load_dataset(
-                    "cc100",
-                    lang=lang,
-                    split="train",
-                    streaming=True,
-                    trust_remote_code=True,
-                )
-                count = 0
-                for item in ds:
-                    text = item["text"].strip()
-                    if len(text) < 10:
-                        continue
-                    raw_texts.append(text)
-                    count += 1
-                    if count >= 100:
-                        break
-            except Exception:
-                pass
-
-        # skip some samples to avoid overlap with training data
-        raw_texts = raw_texts[500:] if len(raw_texts) > 600 else raw_texts[len(raw_texts)//2:]
-
-        test_data = []
-        correct_next_char = []
-        for i in range(len(raw_texts)):
-            # Convert to lowercase if toggle is enabled
-            raw_texts[i] = raw_texts[i].strip()
-            if lowercase:
-                raw_texts[i] = raw_texts[i].lower()
-            if len(raw_texts[i]) < 2:
-                continue
-            index = random.randint(1, len(raw_texts[i]) - 1)
-            # next character is correct_next_char
-            correct_next_char.append(raw_texts[i][index]) 
-            # strip context to right before correct next char
-            test_data.append(raw_texts[i][:index])
-            
-        # write correct next char to file for evaluation
-        os.makedirs('output', exist_ok=True)
-        with open('output/correct_next_char.txt', 'wt') as f:
-            for c in correct_next_char:
-                f.write('{}\n'.format(c))
-        return test_data
+        data = []
+        with open(fname, encoding='utf-8') as f:
+            for line in f:
+                line = line.rstrip('\n')
+                if lowercase:
+                    line = line.lower()
+                data.append(line)
+        return data
 
 
     @classmethod
     def write_pred(cls, preds, fname):
-        with open(fname, 'wt') as f:
+        with open(fname, 'wt', encoding='utf-8') as f:
             for p in preds:
                 f.write('{}\n'.format(p))
 
@@ -187,13 +123,13 @@ class MyModel:
         
         # save prefixes
         prefix_path = os.path.join(work_dir, 'language_prefixes.txt')
-        with open(prefix_path, 'wt') as f:
+        with open(prefix_path, 'wt', encoding='utf-8') as f:
             for lang, prefix_counts in self.language_pref_count.items():
                 for prefix, count in prefix_counts.items():
                     f.write(f"{lang}\t{prefix}\t{count}\n")
         # save word-language map
         word_lang_path = os.path.join(work_dir, 'word_language_map.txt')
-        with open(word_lang_path, 'wt') as f:
+        with open(word_lang_path, 'wt', encoding='utf-8') as f:
             for word, langs in self.word_language_map.items():
                 lang_counts = Counter(langs)
                 lang_str = ",".join(f"{lang}:{count}" for lang, count in lang_counts.items())
@@ -205,7 +141,7 @@ class MyModel:
         model = cls()
         # Load language prefix counts
         prefix_path = os.path.join(work_dir, 'language_prefixes.txt')
-        with open(prefix_path) as f:
+        with open(prefix_path, encoding='utf-8') as f:
             for line in f:
                 lang, prefix, count = line.strip().split('\t')
                 count = int(count)
@@ -215,7 +151,7 @@ class MyModel:
         
         # Load word-language map
         word_lang_path = os.path.join(work_dir, 'word_language_map.txt')
-        with open(word_lang_path) as f:
+        with open(word_lang_path, encoding='utf-8') as f:
             for line in f:
                 word, lang_str = line.strip().split('\t')
                 lang_counts = lang_str.split(',')
@@ -304,7 +240,7 @@ if __name__ == '__main__':
             os.makedirs(args.work_dir)
         print('Instantiating model')
         model = MyModel()
-        print('Loading training data from CC-100')
+        print('Loading training data')
         train_data = MyModel.load_training_data(
             languages=args.languages,
             max_samples_per_lang=args.max_samples,
