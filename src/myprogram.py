@@ -170,15 +170,13 @@ class MyModel:
         preds = []
         for item in tqdm(data):
             output_chars = ""
-
+            char_scores = Counter()
+    
             # Convert input data to lowercase if toggle is enabled
             context_words = item.split()
             if self.lowercase:
                 context_words = [word.lower() for word in context_words]
 
-            if context_words[-1] in self.word_language_map:
-                # could be a space since a valid word
-                output_chars += " "
             # based on non-last words, get language distribution
             lang_dist = Counter()
             for w in context_words[:-1]:
@@ -188,11 +186,17 @@ class MyModel:
             if len(lang_dist) == 0:
                 # if no context, just use all languages
                 lang_dist.update(self.language_pref_count.keys())
-            
-            # based on likelihood of languages, average likelihood of next char across prefixes
+
             prefix = context_words[-1]
+            if prefix in self.word_language_map:
+                # could be a space since a valid word
+                # append count of words in each language/total language corpus and normalize across language frequency
+                for lang, lang_count in lang_dist.items():
+                    prefix_count = self.language_pref_count[lang].get(prefix, 0)
+                    char_scores[" "] += prefix_count * lang_count / sum(lang_dist.values())
+                
+            # based on likelihood of languages, average likelihood of next char across prefixes
             total_lang_count = sum(lang_dist.values())
-            char_scores = Counter()
             for lang, lang_count in lang_dist.items():
                 if lang in self.language_pref_count and prefix in self.language_pref_count[lang]:
                     prefix_count = self.language_pref_count[lang][prefix]
