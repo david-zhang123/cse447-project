@@ -128,9 +128,9 @@ class MyModel:
             words = cur_text.split()
             for w in words:
                 if w not in self.word_language_map:
-                    self.word_language_map[w] = []
+                    self.word_language_map[w] = Counter()
                     
-                self.word_language_map[w].append(lang)
+                self.word_language_map[w][lang] += 1
 
                 
                 # count prefixes of char to word
@@ -156,8 +156,8 @@ class MyModel:
         # save word-language map
         word_lang_path = os.path.join(work_dir, 'word_language_map.txt')
         with open(word_lang_path, 'wt', encoding='utf-8') as f:
-            for word, langs in self.word_language_map.items():
-                lang_counts = Counter(langs)
+            for word, lang_counts in self.word_language_map.items():
+                # lang_counts is already a Counter/dict
                 lang_str = ",".join(f"{lang}:{count}" for lang, count in lang_counts.items())
                 f.write(f"{word}\t{lang_str}\n")
 
@@ -181,11 +181,11 @@ class MyModel:
             for line in f:
                 word, lang_str = line.strip().split('\t')
                 lang_counts = lang_str.split(',')
-                langs = []
+                langs = Counter()
                 for lc in lang_counts:
                     lang, count = lc.split(':')
                     count = int(count)
-                    langs.extend([lang] * count)
+                    langs[lang] = count
                 model.word_language_map[word] = langs
         # print head to confirm load
         print("Loaded model with {} words in word_language_map and {} languages in language_pref_count".format(len(model.word_language_map), len(model.language_pref_count)))
