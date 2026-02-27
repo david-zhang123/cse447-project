@@ -49,25 +49,31 @@ class MyModel:
 
     @classmethod
     def load_test_data(cls, fname, lowercase=True):
-        test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
-        correct_next_char = []
-        for i in range(len(test_data)):
-            # Convert to lowercase if toggle is enabled
-            test_data[i] = test_data[i].strip()
-            if lowercase:
-                test_data[i] = test_data[i].lower()
-            if len(test_data[i]) < 2:
-                continue
-            index = random.randint(1, len(test_data[i]) - 1)
-            # next character is correct_next_char
-            correct_next_char.append(test_data[i][index]) 
-            # strip context to right before correct next char
-            test_data[i] = test_data[i][:index]
-            
-        # write correct next char to file for evaluation
-        with open('output/correct_next_char.txt', 'wt') as f:
-            for c in correct_next_char:
-                f.write('{}\n'.format(c))
+        if fname and fname != 'SYNTHETIC':
+            with open(fname) as f:
+                test_data = [line.strip() for line in f]
+                if lowercase:
+                    test_data = [line.lower() for line in test_data]
+        else:
+            test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
+            correct_next_char = []
+            for i in range(len(test_data)):
+                # Convert to lowercase if toggle is enabled
+                test_data[i] = test_data[i].strip()
+                if lowercase:
+                    test_data[i] = test_data[i].lower()
+                if len(test_data[i]) < 2:
+                    continue
+                index = random.randint(1, len(test_data[i]) - 1)
+                # next character is correct_next_char
+                correct_next_char.append(test_data[i][index]) 
+                # strip context to right before correct next char
+                test_data[i] = test_data[i][:index]
+                
+            # write correct next char to file for evaluation
+            with open('output/correct_next_char.txt', 'wt') as f:
+                for c in correct_next_char:
+                    f.write('{}\n'.format(c))
         return test_data
 
 
@@ -161,12 +167,12 @@ class MyModel:
             if self.lowercase:
                 context_words = [word.lower() for word in context_words]
 
-            if context_words[-1] in self.word_language_map:
-                # could be a space since a valid word
-                output_chars += " "
+            # if context_words[-1] in self.word_language_map:
+            #     # could be a space since a valid word
+            #     output_chars += " "
             # based on non-last words, get language distribution
             lang_dist = Counter()
-            for w in context_words[:-1]:
+            for w in context_words:
                 if w in self.word_language_map:
                     langs = self.word_language_map[w]
                     lang_dist.update(langs)
@@ -178,6 +184,12 @@ class MyModel:
             prefix = context_words[-1]
             total_lang_count = sum(lang_dist.values())
             char_scores = Counter()
+
+            # add spaces based on likelihood of word being complete, which is based on likelihood of language and prefix being a complete word in that language
+            for lang, lang_count in lang_dist.items():
+                if prefix in self.language_pref_count[lang]:
+                    char_scores[" "] += lang_count * self.language_pref_count[lang][prefix] / total_lang_count
+            
             for lang, lang_count in lang_dist.items():
                 if prefix in self.language_pref_count[lang]:
                     prefix_count = self.language_pref_count[lang][prefix]

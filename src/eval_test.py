@@ -14,4 +14,4 @@ if __name__ == "__main__":
             correct_count += 1
         else:
             print(f"Incorrect prediction: '{pred.strip()}' for correct char '{correct.strip()}'")
-    print(f"Accuracy: {correct_count / len(corrects):.4f}")
+    print(f"Accuracy: {correct_count / len(corrects):.6f}")
