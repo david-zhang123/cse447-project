@@ -1,11 +1,7 @@
 #!/usr/bin/env python
 import os
 import random
-# import torch
-# import torch.nn as nn
-# from torch.utils.data import DataLoader
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-# from lstm import CharDataset, SimpleLSTM
 from collections import defaultdict, Counter
 from tqdm import tqdm
 from datasets import load_dataset
@@ -13,7 +9,6 @@ import logging
 
 # Set seed for reproducibility
 random.seed(0)
-# torch.manual_seed(0)
 
 # define logger
 LOGGER = logging.getLogger(__name__)
@@ -28,22 +23,6 @@ DEFAULT_LANGUAGES = [
 
 class MyModel:
     def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None, lowercase=True):
-        # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Hyperparameters for lstm
-        # self.seq_len = 20
-        # self.embedding_dim = 64
-        # self.hidden_dim = 128
-        # self.batch_size = 64
-        # self.epochs = 5
-        # self.lr = 0.001
-
-        # if vocab_size:
-        #     self.model = SimpleLSTM(vocab_size, self.embedding_dim, self.hidden_dim).to(self.device)
-        #     self.char_to_idx = char_to_idx
-        #     self.idx_to_char = idx_to_char
-        # else:
-        #     self.model = None
 
         self.lowercase = lowercase
         self.word_language_map = {}
@@ -75,7 +54,7 @@ class MyModel:
         return data
 
     @classmethod
-    def load_test_data(cls, fname, lowercase=True, gen_synth=False):
+    def load_test_data(cls, fname, lowercase=True, gen_synth=False, limit=None):
         data = []
         if not gen_synth:
             with open(fname, encoding='utf-8') as f:
@@ -85,7 +64,7 @@ class MyModel:
                         line = line.lower()
                     data.append(line)
         else:
-            data = cls().gen_synthetic_test_data(lowercase=lowercase)
+            data = cls.gen_synthetic_test_data(lowercase=lowercase, limit=limit)
         return data
 
 
@@ -96,8 +75,11 @@ class MyModel:
                 f.write('{}\n'.format(p))
 
     @classmethod
-    def gen_synthetic_test_data(cls, lowercase=True):
-        test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
+    def gen_synthetic_test_data(cls, lowercase=True, limit=None):
+        ds = load_dataset("papluca/language-identification", split="test")
+        if limit:
+            ds = ds.select(range(limit))
+        test_data = list(ds["text"])  # Convert to list
         correct_next_char = []
         for i in range(len(test_data)):
             # Convert to lowercase if toggle is enabled
@@ -113,6 +95,8 @@ class MyModel:
             test_data[i] = test_data[i][:index]
             
         # write correct next char to file for evaluation
+        if not os.path.isdir('output'):
+            os.makedirs('output')
         with open('output/correct_next_char.txt', 'wt') as f:
             for c in correct_next_char:
                 f.write('{}\n'.format(c))
@@ -264,6 +248,8 @@ if __name__ == '__main__':
                         help='ISO 639-1 language codes to train on (default: 40 common languages)')
     parser.add_argument('--max_samples', type=int, default=5000,
                         help='max training samples per language')
+    parser.add_argument('--gen_synth', action='store_true', help='Use synthetic test data from huggingface')
+    parser.add_argument('--limit', type=int, default=None, help='Limit number of synthetic samples')
     args = parser.parse_args()
 
     if args.mode == 'train':
@@ -284,8 +270,11 @@ if __name__ == '__main__':
     elif args.mode == 'test':
         print('Loading model')
         model = MyModel.load(args.work_dir)
-        print('Loading test data from {}'.format(args.test_data))
-        test_data = MyModel.load_test_data(args.test_data)
+        if args.gen_synth:
+            print('Generating synthetic test data')
+        else:
+            print('Loading test data from {}'.format(args.test_data))
+        test_data = MyModel.load_test_data(args.test_data, gen_synth=args.gen_synth, limit=args.limit)
         print('Making predictions')
         pred = model.run_pred(test_data)
         print('Writing predictions to {}'.format(args.test_output))

@@ -1,4 +1,2 @@
-datasets
-transformers
-wandb
 tqdm
+datasets

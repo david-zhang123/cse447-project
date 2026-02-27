@@ -1,96 +1,132 @@
 #!/usr/bin/env python
 import os
 import random
-# import torch
-# import torch.nn as nn
-# from torch.utils.data import DataLoader
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from lstm import CharDataset, SimpleLSTM
 from collections import defaultdict, Counter
 from tqdm import tqdm
 from datasets import load_dataset
+import logging
 
 # Set seed for reproducibility
 random.seed(0)
-# torch.manual_seed(0)
+
+# define logger
+LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+DEFAULT_LANGUAGES = [
+    "en", "es", "fr", "de", "it", "pt", "nl", "ru", "zh", "ja",
+    "ko", "ar", "hi", "bn", "tr", "pl", "vi", "th", "sv", "fi",
+    "cs", "ro", "hu", "el", "he", "id", "ms", "uk", "fa", "ta",
+    "te", "ml", "ka", "sw", "af", "ur", "sr", "hr", "bg", "sk",
+]
 
 class MyModel:
-    def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None):
-        # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Hyperparameters for lstm
-        # self.seq_len = 20
-        # self.embedding_dim = 64
-        # self.hidden_dim = 128
-        # self.batch_size = 64
-        # self.epochs = 5
-        # self.lr = 0.001
+    def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None, lowercase=True):
 
-        # if vocab_size:
-        #     self.model = SimpleLSTM(vocab_size, self.embedding_dim, self.hidden_dim).to(self.device)
-        #     self.char_to_idx = char_to_idx
-        #     self.idx_to_char = idx_to_char
-        # else:
-        #     self.model = None
-
+        self.lowercase = lowercase
         self.word_language_map = {}
         self.language_pref_count = {}
 
     @classmethod
-    def load_training_data(cls):
-        # load amazon reviews database from huggingface
-        return load_dataset("papluca/language-identification", split="train")
+    def load_training_data(cls, languages=None, max_samples_per_lang=5000):
+        if languages is None:
+            languages = DEFAULT_LANGUAGES
+
+        data = []
+        for lang in tqdm(languages, desc="Loading languages"):
+            try:
+                ds = load_dataset("wikimedia/wikipedia", f"20231101.{lang}", split="train", streaming=True)
+                count = 0
+                for item in ds:
+                    text = item["text"].strip()
+                    if len(text) < 5:
+                        continue
+                    data.append({"text": text, "labels": lang})
+                    count += 1
+                    if count >= max_samples_per_lang:
+                        break
+                LOGGER.info(f"Loaded {count} samples for language '{lang}'")
+            except Exception as e:
+                LOGGER.warning(f"Could not load language '{lang}': {e}")
+        random.shuffle(data)
+        LOGGER.info(f"Total training samples: {len(data)}")
+        return data
 
     @classmethod
-    def load_test_data(cls, fname):
-        # data = []
-        # with open(fname) as f:
-        #     for line in f:
-        #         inp = line[:-1]  # remove newline
-        #         data.append(inp)
-        # return data
-
-        test_data = load_dataset("papluca/language-identification", split="test")['text']
-        correct_next_char = []
-        for i in range(len(test_data)):
-            # randomly choose point to strip context to
-            index = random.randint(1, len(test_data[i]) - 2)
-            test_data[i] = test_data[i].strip()[:index]
-            correct_next_char.append(test_data[i][index])
-        # write correct next char to file for evaluation
-        with open('correct_next_char.txt', 'wt') as f:
-            for c in correct_next_char:
-                f.write('{}\n'.format(c))
-        return test_data
+    def load_test_data(cls, fname, lowercase=True, gen_synth=False, limit=None):
+        data = []
+        if not gen_synth:
+            with open(fname, encoding='utf-8') as f:
+                for line in f:
+                    line = line.rstrip('\n')
+                    if lowercase:
+                        line = line.lower()
+                    data.append(line)
+        else:
+            data = cls.gen_synthetic_test_data(lowercase=lowercase, limit=limit)
+        return data
 
 
     @classmethod
     def write_pred(cls, preds, fname):
-        with open(fname, 'wt') as f:
+        with open(fname, 'wt', encoding='utf-8') as f:
             for p in preds:
                 f.write('{}\n'.format(p))
 
+    @classmethod
+    def gen_synthetic_test_data(cls, lowercase=True, limit=None):
+        ds = load_dataset("papluca/language-identification", split="test")
+        if limit:
+            ds = ds.select(range(limit))
+        test_data = list(ds["text"])  # Convert to list
+        correct_next_char = []
+        for i in range(len(test_data)):
+            # Convert to lowercase if toggle is enabled
+            test_data[i] = test_data[i].strip()
+            if lowercase:
+                test_data[i] = test_data[i].lower()
+            if len(test_data[i]) < 2:
+                continue
+            index = random.randint(1, len(test_data[i]) - 1)
+            # next character is correct_next_char
+            correct_next_char.append(test_data[i][index]) 
+            # strip context to right before correct next char
+            test_data[i] = test_data[i][:index]
+            
+        # write correct next char to file for evaluation
+        if not os.path.isdir('output'):
+            os.makedirs('output')
+        with open('output/correct_next_char.txt', 'wt') as f:
+            for c in correct_next_char:
+                f.write('{}\n'.format(c))
+        return test_data
+
     def run_train(self, text, work_dir):
-        # loop through the huggingface dataset text
-        for item in tqdm(text):
+        # loop through the training data text
+        for item in tqdm(text, desc="Counting words"):
             lang = item['labels']   
             cur_text = item['text']
+            if self.lowercase:
+                cur_text = cur_text.lower()
             words = cur_text.split()
             for w in words:
                 if w not in self.word_language_map:
-                    self.word_language_map[w] = []
+                    self.word_language_map[w] = Counter()
                     
-                self.word_language_map[w].append(lang)
+                self.word_language_map[w][lang] += 1
 
+        # Post-process to build language_pref_count
+        LOGGER.info("Building prefix counts...")
+        for w, lang_counts in tqdm(self.word_language_map.items(), desc="Computing prefixes"):
+            for lang, count in lang_counts.items():
+                if lang not in self.language_pref_count:
+                    self.language_pref_count[lang] = defaultdict(int)
                 
-                # count prefixes of char to word
+                lang_pref = self.language_pref_count[lang]
                 for i in range(len(w)):
                     prefix = w[:i+1]
-                    if lang not in self.language_pref_count:
-                        self.language_pref_count[lang] = {}
-                    if prefix not in self.language_pref_count[lang]:
-                        self.language_pref_count[lang][prefix] = 0
-                    self.language_pref_count[lang][prefix] += 1
+                    lang_pref[prefix] += count
 
                 
                 
@@ -99,15 +135,15 @@ class MyModel:
         
         # save prefixes
         prefix_path = os.path.join(work_dir, 'language_prefixes.txt')
-        with open(prefix_path, 'wt') as f:
+        with open(prefix_path, 'wt', encoding='utf-8') as f:
             for lang, prefix_counts in self.language_pref_count.items():
                 for prefix, count in prefix_counts.items():
                     f.write(f"{lang}\t{prefix}\t{count}\n")
         # save word-language map
         word_lang_path = os.path.join(work_dir, 'word_language_map.txt')
-        with open(word_lang_path, 'wt') as f:
-            for word, langs in self.word_language_map.items():
-                lang_counts = Counter(langs)
+        with open(word_lang_path, 'wt', encoding='utf-8') as f:
+            for word, lang_counts in self.word_language_map.items():
+                # lang_counts is already a Counter/dict
                 lang_str = ",".join(f"{lang}:{count}" for lang, count in lang_counts.items())
                 f.write(f"{word}\t{lang_str}\n")
 
@@ -117,7 +153,7 @@ class MyModel:
         model = cls()
         # Load language prefix counts
         prefix_path = os.path.join(work_dir, 'language_prefixes.txt')
-        with open(prefix_path) as f:
+        with open(prefix_path, encoding='utf-8') as f:
             for line in f:
                 lang, prefix, count = line.strip().split('\t')
                 count = int(count)
@@ -127,16 +163,18 @@ class MyModel:
         
         # Load word-language map
         word_lang_path = os.path.join(work_dir, 'word_language_map.txt')
-        with open(word_lang_path) as f:
+        with open(word_lang_path, encoding='utf-8') as f:
             for line in f:
                 word, lang_str = line.strip().split('\t')
                 lang_counts = lang_str.split(',')
-                langs = []
+                langs = Counter()
                 for lc in lang_counts:
                     lang, count = lc.split(':')
                     count = int(count)
-                    langs.extend([lang] * count)
+                    langs[lang] = count
                 model.word_language_map[word] = langs
+        # print head to confirm load
+        print("Loaded model with {} words in word_language_map and {} languages in language_pref_count".format(len(model.word_language_map), len(model.language_pref_count)))
 
         return model
 
@@ -144,11 +182,13 @@ class MyModel:
         preds = []
         for item in tqdm(data):
             output_chars = ""
-
+            char_scores = Counter()
+    
+            # Convert input data to lowercase if toggle is enabled
             context_words = item.split()
-            if context_words[-1] in self.word_language_map:
-                # could be a space since a valid word
-                output_chars += " "
+            if self.lowercase:
+                context_words = [word.lower() for word in context_words]
+
             # based on non-last words, get language distribution
             lang_dist = Counter()
             for w in context_words[:-1]:
@@ -158,19 +198,40 @@ class MyModel:
             if len(lang_dist) == 0:
                 # if no context, just use all languages
                 lang_dist.update(self.language_pref_count.keys())
-            
-            # based on likelihood of languages, average likelihood of next char across prefixes
-            prefix = context_words[-1]
-            char_scores = Counter()
-            for lang, lang_count in lang_dist.items():
-                if prefix in self.language_pref_count[lang]:
-                    prefix_count = self.language_pref_count[lang][prefix]
-                    for char, char_count in self.language_pref_count[lang].items():
-                        if char.startswith(prefix) and len(char) > len(prefix):
-                            char_scores[char[len(prefix)]] += (char_count / prefix_count) * lang_count
 
+            prefix = context_words[-1]
+            if prefix in self.word_language_map:
+                # could be a space since a valid word
+                # append count of words in each language/total language corpus and normalize across language frequency
+                for lang, lang_count in lang_dist.items():
+                    prefix_count = self.language_pref_count[lang].get(prefix, 0)
+                    char_scores[" "] += prefix_count * lang_count / sum(lang_dist.values())
+                
+            # based on likelihood of languages, average likelihood of next char across prefixes
+            total_lang_count = sum(lang_dist.values())
+            for lang, lang_count in lang_dist.items():
+                if lang in self.language_pref_count and prefix in self.language_pref_count[lang]:
+                    prefix_count = self.language_pref_count[lang][prefix]
+                    # Iterate over all words in the language
+                    for word, char_count in self.language_pref_count[lang].items():
+                        if word.startswith(prefix) and len(word) == len(prefix) + 1:
+                            next_char = word[len(prefix)]
+                            char_scores[next_char] += prefix_count * char_count * lang_count / total_lang_count
             # choose char with highest scores until output_chars is length 3, we want 3 total predictions for the same next char
             while len(output_chars) < 3:
+                if not char_scores:
+                    # Handle empty char_scores by appending random character from item
+                    # that is not already in output_chars
+                    rand_char = random.choice(item)
+                    while rand_char in output_chars:
+                        rand_char = random.choice(item)
+                        # if there are no new characters to choose from, choose random ones
+                        if len(set(item) - set(output_chars)) == 0:
+                            rand_char = random.choice('abcdefghijklmnopqrstuvwxyz .!?')
+                            break
+                    output_chars += rand_char
+                    LOGGER.warning(f"Empty char_scores for prefix '{item}'. Appending random character '{rand_char}' from input.")
+                    continue
                 next_char = char_scores.most_common(1)[0][0]
                 output_chars += next_char
                 del char_scores[next_char]
@@ -183,6 +244,12 @@ if __name__ == '__main__':
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
     parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
+    parser.add_argument('--languages', nargs='+', default=None,
+                        help='ISO 639-1 language codes to train on (default: 40 common languages)')
+    parser.add_argument('--max_samples', type=int, default=5000,
+                        help='max training samples per language')
+    parser.add_argument('--gen_synth', action='store_true', help='Use synthetic test data from huggingface')
+    parser.add_argument('--limit', type=int, default=None, help='Limit number of synthetic samples')
     args = parser.parse_args()
 
     if args.mode == 'train':
@@ -192,7 +259,10 @@ if __name__ == '__main__':
         print('Instantiating model')
         model = MyModel()
         print('Loading training data')
-        train_data = MyModel.load_training_data()
+        train_data = MyModel.load_training_data(
+            languages=args.languages,
+            max_samples_per_lang=args.max_samples,
+        )
         print('Training')
         model.run_train(train_data, args.work_dir)
         print('Saving model')
@@ -200,8 +270,11 @@ if __name__ == '__main__':
     elif args.mode == 'test':
         print('Loading model')
         model = MyModel.load(args.work_dir)
-        print('Loading test data from {}'.format(args.test_data))
-        test_data = MyModel.load_test_data(args.test_data)
+        if args.gen_synth:
+            print('Generating synthetic test data')
+        else:
+            print('Loading test data from {}'.format(args.test_data))
+        test_data = MyModel.load_test_data(args.test_data, gen_synth=args.gen_synth, limit=args.limit)
         print('Making predictions')
         pred = model.run_pred(test_data)
         print('Writing predictions to {}'.format(args.test_output))
