@@ -85,7 +85,7 @@ class MyModel:
                         line = line.lower()
                     data.append(line)
         else:
-            data = gen_synthetic_test_data(lowercase=lowercase)
+            data = cls().gen_synthetic_test_data(lowercase=lowercase)
         return data
 
 
@@ -95,7 +95,8 @@ class MyModel:
             for p in preds:
                 f.write('{}\n'.format(p))
 
-    def gen_synthetic_test_data(lowercase=True):
+    @classmethod
+    def gen_synthetic_test_data(cls, lowercase=True):
         test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
         correct_next_char = []
         for i in range(len(test_data)):
