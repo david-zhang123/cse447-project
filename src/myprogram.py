@@ -120,7 +120,7 @@ class MyModel:
 
     def run_train(self, text, work_dir):
         # loop through the training data text
-        for item in tqdm(text):
+        for item in tqdm(text, desc="Counting words"):
             lang = item['labels']   
             cur_text = item['text']
             if self.lowercase:
@@ -132,15 +132,17 @@ class MyModel:
                     
                 self.word_language_map[w][lang] += 1
 
+        # Post-process to build language_pref_count
+        LOGGER.info("Building prefix counts...")
+        for w, lang_counts in tqdm(self.word_language_map.items(), desc="Computing prefixes"):
+            for lang, count in lang_counts.items():
+                if lang not in self.language_pref_count:
+                    self.language_pref_count[lang] = defaultdict(int)
                 
-                # count prefixes of char to word
+                lang_pref = self.language_pref_count[lang]
                 for i in range(len(w)):
                     prefix = w[:i+1]
-                    if lang not in self.language_pref_count:
-                        self.language_pref_count[lang] = {}
-                    if prefix not in self.language_pref_count[lang]:
-                        self.language_pref_count[lang][prefix] = 0
-                    self.language_pref_count[lang][prefix] += 1
+                    lang_pref[prefix] += count
 
                 
                 
