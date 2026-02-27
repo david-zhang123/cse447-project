@@ -120,7 +120,7 @@ class MyModel:
 
     def run_train(self, text, work_dir):
         # loop through the training data text
-        for item in tqdm(text):
+        for item in tqdm(text, desc="Counting words"):
             lang = item['labels']   
             cur_text = item['text']
             if self.lowercase:
@@ -128,19 +128,21 @@ class MyModel:
             words = cur_text.split()
             for w in words:
                 if w not in self.word_language_map:
-                    self.word_language_map[w] = []
+                    self.word_language_map[w] = Counter()
                     
-                self.word_language_map[w].append(lang)
+                self.word_language_map[w][lang] += 1
 
+        # Post-process to build language_pref_count
+        LOGGER.info("Building prefix counts...")
+        for w, lang_counts in tqdm(self.word_language_map.items(), desc="Computing prefixes"):
+            for lang, count in lang_counts.items():
+                if lang not in self.language_pref_count:
+                    self.language_pref_count[lang] = defaultdict(int)
                 
-                # count prefixes of char to word
+                lang_pref = self.language_pref_count[lang]
                 for i in range(len(w)):
                     prefix = w[:i+1]
-                    if lang not in self.language_pref_count:
-                        self.language_pref_count[lang] = {}
-                    if prefix not in self.language_pref_count[lang]:
-                        self.language_pref_count[lang][prefix] = 0
-                    self.language_pref_count[lang][prefix] += 1
+                    lang_pref[prefix] += count
 
                 
                 
@@ -156,8 +158,8 @@ class MyModel:
         # save word-language map
         word_lang_path = os.path.join(work_dir, 'word_language_map.txt')
         with open(word_lang_path, 'wt', encoding='utf-8') as f:
-            for word, langs in self.word_language_map.items():
-                lang_counts = Counter(langs)
+            for word, lang_counts in self.word_language_map.items():
+                # lang_counts is already a Counter/dict
                 lang_str = ",".join(f"{lang}:{count}" for lang, count in lang_counts.items())
                 f.write(f"{word}\t{lang_str}\n")
 
@@ -181,11 +183,11 @@ class MyModel:
             for line in f:
                 word, lang_str = line.strip().split('\t')
                 lang_counts = lang_str.split(',')
-                langs = []
+                langs = Counter()
                 for lc in lang_counts:
                     lang, count = lc.split(':')
                     count = int(count)
-                    langs.extend([lang] * count)
+                    langs[lang] = count
                 model.word_language_map[word] = langs
         # print head to confirm load
         print("Loaded model with {} words in word_language_map and {} languages in language_pref_count".format(len(model.word_language_map), len(model.language_pref_count)))
