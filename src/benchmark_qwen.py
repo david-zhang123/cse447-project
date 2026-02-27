@@ -2,14 +2,29 @@ from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import random
 from tqdm import tqdm
+from pathlib import Path
 
 # Set seed for reproducibility
 random.seed(0)
 
+# Set the local directory for saving the model
+LOCAL_MODEL_DIR = "local_qwen_model"
+
 def query_qwen_model(input_text, model_name="Qwen/Qwen3-0.6B"):
     """Query the Qwen model to generate exactly 3 characters."""
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    local_model_path = Path(LOCAL_MODEL_DIR)
+
+    # Check if the model is already saved locally
+    if not local_model_path.exists():
+        print(f"Saving model locally to {LOCAL_MODEL_DIR}...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+        tokenizer.save_pretrained(LOCAL_MODEL_DIR)
+        model.save_pretrained(LOCAL_MODEL_DIR)
+    else:
+        print(f"Loading model from local directory {LOCAL_MODEL_DIR}...")
+        tokenizer = AutoTokenizer.from_pretrained(LOCAL_MODEL_DIR)
+        model = AutoModelForCausalLM.from_pretrained(LOCAL_MODEL_DIR)
 
     # Tokenize the input text
     inputs = tokenizer(input_text, return_tensors="pt")

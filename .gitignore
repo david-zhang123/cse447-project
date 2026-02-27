@@ -4,5 +4,7 @@ output/
 submit/
 submit.zip
 
+local_qwen_model/
+
 *.log
 .log
