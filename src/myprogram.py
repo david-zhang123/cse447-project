@@ -75,14 +75,17 @@ class MyModel:
         return data
 
     @classmethod
-    def load_test_data(cls, fname, lowercase=True):
+    def load_test_data(cls, fname, lowercase=True, gen_synth=False):
         data = []
-        with open(fname, encoding='utf-8') as f:
-            for line in f:
-                line = line.rstrip('\n')
-                if lowercase:
-                    line = line.lower()
-                data.append(line)
+        if not gen_synth:
+            with open(fname, encoding='utf-8') as f:
+                for line in f:
+                    line = line.rstrip('\n')
+                    if lowercase:
+                        line = line.lower()
+                    data.append(line)
+        else:
+            data = gen_synthetic_test_data(lowercase=lowercase)
         return data
 
 
@@ -91,6 +94,28 @@ class MyModel:
         with open(fname, 'wt', encoding='utf-8') as f:
             for p in preds:
                 f.write('{}\n'.format(p))
+
+    def gen_synthetic_test_data(lowercase=True):
+        test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
+        correct_next_char = []
+        for i in range(len(test_data)):
+            # Convert to lowercase if toggle is enabled
+            test_data[i] = test_data[i].strip()
+            if lowercase:
+                test_data[i] = test_data[i].lower()
+            if len(test_data[i]) < 2:
+                continue
+            index = random.randint(1, len(test_data[i]) - 1)
+            # next character is correct_next_char
+            correct_next_char.append(test_data[i][index]) 
+            # strip context to right before correct next char
+            test_data[i] = test_data[i][:index]
+            
+        # write correct next char to file for evaluation
+        with open('output/correct_next_char.txt', 'wt') as f:
+            for c in correct_next_char:
+                f.write('{}\n'.format(c))
+        return test_data
 
     def run_train(self, text, work_dir):
         # loop through the training data text
