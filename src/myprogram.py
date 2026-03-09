@@ -21,23 +21,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class MyModel:
     def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None, lowercase=True):
-        # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Hyperparameters for lstm
-        # self.seq_len = 20
-        # self.embedding_dim = 64
-        # self.hidden_dim = 128
-        # self.batch_size = 64
-        # self.epochs = 5
-        # self.lr = 0.001
-
-        # if vocab_size:
-        #     self.model = SimpleLSTM(vocab_size, self.embedding_dim, self.hidden_dim).to(self.device)
-        #     self.char_to_idx = char_to_idx
-        #     self.idx_to_char = idx_to_char
-        # else:
-        #     self.model = None
-
         self.lowercase = lowercase
         self.word_language_map = {}
         self.language_pref_count = {}
@@ -106,7 +89,11 @@ class MyModel:
                     if prefix not in self.language_pref_count[lang]:
                         self.language_pref_count[lang][prefix] = 0
                     self.language_pref_count[lang][prefix] += 1
-
+        # remove elements that appear less than 5 times from chargram
+        for lang, prefix_counts in self.language_pref_count.items():
+            for prefix, count in list(prefix_counts.items()):
+                if count < 5:
+                    del self.language_pref_count[lang][prefix]
                 
                 
     def save(self, work_dir):
