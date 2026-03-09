@@ -19,6 +19,27 @@ random.seed(0)
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+CC100_LANGUAGES = [
+    "af", "am", "ar", "as", "az", "be", "bg", "bn", "br", "bs",
+    "ca", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et",
+    "eu", "fa", "ff", "fi", "fr", "fy", "ga", "gd", "gl", "gn",
+    "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig",
+    "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "ku",
+    "ky", "la", "lg", "li", "ln", "lo", "lt", "lv", "mg", "mk",
+    "ml", "mn", "mr", "ms", "my", "ne", "nl", "no", "ns", "om",
+    "or", "pa", "pl", "ps", "pt", "qu", "rm", "ro", "ru", "sa",
+    "si", "sk", "sl", "so", "sq", "sr", "ss", "su", "sv", "sw",
+    "ta", "te", "th", "tl", "tn", "tr", "ug", "uk", "ur", "uz",
+    "vi", "wo", "xh", "yi", "yo", "zh", "zu",
+]
+
+DEFAULT_LANGUAGES = [
+    "en", "es", "fr", "de", "it", "pt", "nl", "ru", "zh", "ja",
+    "ko", "ar", "hi", "bn", "tr", "pl", "vi", "th", "sv", "fi",
+    "cs", "ro", "hu", "el", "he", "id", "ms", "uk", "fa", "ta",
+    "te", "ml", "ka", "sw", "af", "ur", "sr", "hr", "bg", "sk",
+]
+
 class MyModel:
     def __init__(self, vocab_size=None, char_to_idx=None, idx_to_char=None, lowercase=True):
         self.lowercase = lowercase
@@ -28,7 +49,36 @@ class MyModel:
     @classmethod
     def load_training_data(cls):
         # load amazon reviews database from huggingface
-        return load_dataset("papluca/language-identification", split="train")
+        # return load_dataset("papluca/language-identification", split="train")
+
+        if languages is None:
+            languages = DEFAULT_LANGUAGES
+
+        data = []
+        for lang in tqdm(languages, desc="Loading languages"):
+            try:
+                ds = load_dataset(
+                    "cc100",
+                    lang=lang,
+                    split="train",
+                    streaming=True,
+                    trust_remote_code=True,
+                )
+                count = 0
+                for item in ds:
+                    text = item["text"].strip()
+                    if len(text) < 5:
+                        continue
+                    data.append({"text": text, "labels": lang})
+                    count += 1
+                    if count >= max_samples_per_lang:
+                        break
+                LOGGER.info(f"Loaded {count} samples for language '{lang}'")
+            except Exception as e:
+                LOGGER.warning(f"Could not load language '{lang}': {e}")
+        random.shuffle(data)
+        LOGGER.info(f"Total training samples: {len(data)}")
+        return data
 
     @classmethod
     def load_test_data(cls, fname, lowercase=True):
