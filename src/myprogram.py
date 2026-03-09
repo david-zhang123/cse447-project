@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import random
+import time
 # import torch
 # import torch.nn as nn
 # from torch.utils.data import DataLoader
@@ -82,31 +83,38 @@ class MyModel:
 
     @classmethod
     def load_test_data(cls, fname, lowercase=True):
+        test_languages = []  # To store languages for synthetic data
         if fname and fname != 'SYNTHETIC':
             with open(fname) as f:
                 test_data = [line.strip() for line in f]
                 if lowercase:
                     test_data = [line.lower() for line in test_data]
         else:
-            test_data = list(load_dataset("papluca/language-identification", split="test")["text"])  # Convert to list
+            total_data = list(load_dataset("papluca/language-identification", split="test"))
+            test_data = [item['text'] for item in total_data]
+            test_languages = [item['labels'] for item in total_data]
             correct_next_char = []
             for i in range(len(test_data)):
-                # Convert to lowercase if toggle is enabled
                 test_data[i] = test_data[i].strip()
                 if lowercase:
                     test_data[i] = test_data[i].lower()
                 if len(test_data[i]) < 2:
                     continue
                 index = random.randint(1, len(test_data[i]) - 1)
-                # next character is correct_next_char
-                correct_next_char.append(test_data[i][index]) 
-                # strip context to right before correct next char
+                correct_next_char.append(test_data[i][index])
                 test_data[i] = test_data[i][:index]
-                
-            # write correct next char to file for evaluation
+
+
+            # Write correct next char to file for evaluation
             with open('output/correct_next_char.txt', 'wt') as f:
                 for c in correct_next_char:
                     f.write('{}\n'.format(c))
+
+            # Write test languages to file
+            with open('output/test_languages.txt', 'wt') as f:
+                for lang in test_languages:
+                    f.write(f'{lang}\n')
+
         return test_data
 
 
@@ -196,7 +204,11 @@ class MyModel:
 
     def run_pred(self, data):
         preds = []
-        for item in tqdm(data):
+        with open('output/test_languages.txt') as f:
+            test_languages = [line.strip() for line in f]
+
+        correct_count = 0  # To calculate language detection accuracy
+        for idx, item in enumerate(tqdm(data)):
             output_chars = ""
 
             # Convert input data to lowercase if toggle is enabled
@@ -204,9 +216,6 @@ class MyModel:
             if self.lowercase:
                 context_words = [word.lower() for word in context_words]
 
-            # if context_words[-1] in self.word_language_map:
-            #     # could be a space since a valid word
-            #     output_chars += " "
             # based on non-last words, get language distribution
             lang_dist = Counter()
             for w in context_words:
@@ -217,8 +226,12 @@ class MyModel:
                 # if no context, just use all languages
                 lang_dist.update(self.language_pref_count.keys())
             
-            # based on likelihood of languages, average likelihood of next char across prefixes
-            prefix = context_words[-1]
+            # Check if the correct language is in lang_dist
+            correct_language = test_languages[idx]
+            if correct_language in lang_dist:
+                correct_count += 1
+
+            prefix = context_words[-1] if context_words else ""
             total_lang_count = sum(lang_dist.values())
             char_scores = Counter()
 
@@ -254,6 +267,13 @@ class MyModel:
                 output_chars += next_char
                 del char_scores[next_char]
             preds.append(output_chars)
+
+        # Log language detection accuracy
+        language_accuracy = correct_count / len(data)
+        LOGGER.info(f'Language detection accuracy: {language_accuracy:.2%}')
+        with open(os.path.join('output', 'language_accuracy.txt'), 'wt') as f:
+            f.write(f'Language detection accuracy: {language_accuracy:.2%}\n')
+
         return preds
 
 if __name__ == '__main__':
@@ -262,6 +282,7 @@ if __name__ == '__main__':
     parser.add_argument('--work_dir', help='where to save', default='work')
     parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
     parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
+    parser.add_argument('--correct_output', help='path to correct next char file', default='output/correct_next_char.txt')
     args = parser.parse_args()
 
     if args.mode == 'train':
@@ -277,6 +298,7 @@ if __name__ == '__main__':
         print('Saving model')
         model.save(args.work_dir)
     elif args.mode == 'test':
+        start_time = time.time()
         print('Loading model')
         model = MyModel.load(args.work_dir)
         print('Loading test data from {}'.format(args.test_data))
@@ -286,5 +308,22 @@ if __name__ == '__main__':
         print('Writing predictions to {}'.format(args.test_output))
         assert len(pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(pred))
         model.write_pred(pred, args.test_output)
+        elapsed_time = time.time() - start_time
+
+        # Calculate accuracy
+        if os.path.exists(args.correct_output):
+            with open(args.correct_output) as f:
+                correct = [line.strip() for line in f]
+            correct = correct[:len(pred)]  # Ensure lengths match
+            accuracy = sum(1 for p, c in zip(pred, correct) if p == c) / len(correct)
+            print(f'Accuracy: {accuracy:.2%}')
+            LOGGER.info(f'Test accuracy: {accuracy:.2%}')
+
+            # Save accuracy to a file
+            accuracy_file = os.path.join(args.work_dir, 'test_accuracy.txt')
+            with open(accuracy_file, 'wt') as f:
+                f.write(f'Accuracy: {accuracy:.2%}\n')
+
+        LOGGER.info(f'Test completed in {elapsed_time:.2f} seconds')
     else:
         raise NotImplementedError('Unknown mode {}'.format(args.mode))
