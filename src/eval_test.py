@@ -2,7 +2,7 @@
 
 if __name__ == "__main__":
     pred_path = 'output/pred.txt'
-    correct_path = 'output/correct_next_char.txt'
+    correct_path = 'example/answer.txt'
 
     with open(pred_path) as f:
         preds = [line.strip() for line in f]

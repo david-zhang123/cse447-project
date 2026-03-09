@@ -29,5 +29,8 @@ cp -r src submit/src
 # submit checkpoints
 cp -r work submit/work
 
+# submit writeup
+# cp 447_Checkpoint_3_Group_39.pdf submit/447_Checkpoint_3_Group_39.pdf
+
 # make zip file
 zip -r Project447Group39.zip submit
