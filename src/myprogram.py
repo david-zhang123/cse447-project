@@ -337,18 +337,18 @@ if __name__ == '__main__':
         elapsed_time = time.time() - start_time
 
         # Calculate accuracy
-        if os.path.exists(args.correct_output):
-            with open(args.correct_output) as f:
-                correct = [line.strip() for line in f]
-            correct = correct[:len(pred)]  # Ensure lengths match
-            accuracy = sum(1 for p, c in zip(pred, correct) if p == c) / len(correct)
-            print(f'Accuracy: {accuracy:.2%}')
-            LOGGER.info(f'Test accuracy: {accuracy:.2%}')
+        # if os.path.exists(args.correct_output):
+        #     with open(args.correct_output) as f:
+        #         correct = [line.strip() for line in f]
+        #     correct = correct[:len(pred)]  # Ensure lengths match
+        #     accuracy = sum(1 for p, c in zip(pred, correct) if p == c) / len(correct)
+        #     print(f'Accuracy: {accuracy:.2%}')
+        #     LOGGER.info(f'Test accuracy: {accuracy:.2%}')
 
-            # Save accuracy to a file
-            accuracy_file = os.path.join(args.work_dir, 'test_accuracy.txt')
-            with open(accuracy_file, 'wt') as f:
-                f.write(f'Accuracy: {accuracy:.2%}\n')
+        #     # Save accuracy to a file
+        #     accuracy_file = os.path.join(args.work_dir, 'test_accuracy.txt')
+        #     with open(accuracy_file, 'wt') as f:
+        #         f.write(f'Accuracy: {accuracy:.2%}\n')
 
         LOGGER.info(f'Test completed in {elapsed_time:.2f} seconds')
     else:
