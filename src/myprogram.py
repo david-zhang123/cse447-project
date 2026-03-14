@@ -52,31 +52,40 @@ class MyModel:
         # load amazon reviews database from huggingface
         # return load_dataset("papluca/language-identification", split="train")
 
-        if languages is None:
-            languages = DEFAULT_LANGUAGES
+        languages = DEFAULT_LANGUAGES
 
         data = []
-        for lang in tqdm(languages, desc="Loading languages"):
-            try:
-                ds = load_dataset(
-                    "cc100",
-                    lang=lang,
-                    split="train",
-                    streaming=True,
-                    trust_remote_code=True,
-                )
-                count = 0
-                for item in ds:
-                    text = item["text"].strip()
-                    if len(text) < 5:
-                        continue
-                    data.append({"text": text, "labels": lang})
-                    count += 1
-                    if count >= max_samples_per_lang:
-                        break
-                LOGGER.info(f"Loaded {count} samples for language '{lang}'")
-            except Exception as e:
-                LOGGER.warning(f"Could not load language '{lang}': {e}")
+        ds = load_dataset(
+            "papluca/language-identification",
+            split="train",
+            streaming=True,
+            trust_remote_code=True,
+        )
+        for item in ds:
+            text = item["text"].strip()
+            data.append({"text": text, "labels": item["labels"]})
+        # for lang in tqdm(languages, desc="Loading languages"):
+            # try:
+                
+            #     ds = load_dataset(
+            #         "cc100",
+            #         lang=lang,
+            #         split="train",
+            #         streaming=True,
+            #         trust_remote_code=True,
+            #     )
+            #     count = 0
+            #     for item in ds:
+            #         text = item["text"].strip()
+            #         if len(text) < 5:
+            #             continue
+            #         data.append({"text": text, "labels": lang})
+            #         count += 1
+            #         if count >= max_samples_per_lang:
+            #             break
+            #     LOGGER.info(f"Loaded {count} samples for language '{lang}'")
+            # except Exception as e:
+            #     LOGGER.warning(f"Could not load language '{lang}': {e}")
         random.shuffle(data)
         LOGGER.info(f"Total training samples: {len(data)}")
         return data
@@ -90,7 +99,23 @@ class MyModel:
                 if lowercase:
                     test_data = [line.lower() for line in test_data]
         else:
-            total_data = list(load_dataset("papluca/language-identification", split="test"))
+            total_data = load_dataset(
+                "papluca/language-identification",
+                split="test",
+                streaming=True,
+                trust_remote_code=True,
+            )
+            # total_data = []
+            # for lang in DEFAULT_LANGUAGES:
+            #     ds = load_dataset(
+            #         "cc100",
+            #         lang=lang,
+            #         split="train",
+            #         streaming=True,
+            #         trust_remote_code=True,
+            #     )
+            #     total_data.extend([{"text": item["text"], "labels": lang} for item in ds])
+        
             test_data = [item['text'] for item in total_data]
             test_languages = [item['labels'] for item in total_data]
             correct_next_char = []
@@ -204,11 +229,11 @@ class MyModel:
 
     def run_pred(self, data):
         preds = []
-        with open('output/test_languages.txt') as f:
-            test_languages = [line.strip() for line in f]
+        # with open('output/test_languages.txt') as f:
+        #     test_languages = [line.strip() for line in f]
 
         correct_count = 0  # To calculate language detection accuracy
-        for idx, item in enumerate(tqdm(data)):
+        for idx, item in enumerate(data): # add tqdm for progress bar
             output_chars = ""
 
             # Convert input data to lowercase if toggle is enabled
@@ -227,9 +252,9 @@ class MyModel:
                 lang_dist.update(self.language_pref_count.keys())
             
             # Check if the correct language is in lang_dist
-            correct_language = test_languages[idx]
-            if correct_language in lang_dist:
-                correct_count += 1
+            # correct_language = test_languages[idx]
+            # if correct_language in lang_dist:
+            #     correct_count += 1
 
             prefix = context_words[-1] if context_words else ""
             total_lang_count = sum(lang_dist.values())
@@ -261,7 +286,7 @@ class MyModel:
                             rand_char = random.choice('abcdefghijklmnopqrstuvwxyz .!?')
                             break
                     output_chars += rand_char
-                    LOGGER.warning(f"Empty char_scores for prefix '{item}'. Appending random character '{rand_char}' from input.")
+                    # LOGGER.warning(f"Empty char_scores for prefix '{item}'. Appending random character '{rand_char}' from input.")
                     continue
                 next_char = char_scores.most_common(1)[0][0]
                 output_chars += next_char
@@ -269,10 +294,10 @@ class MyModel:
             preds.append(output_chars)
 
         # Log language detection accuracy
-        language_accuracy = correct_count / len(data)
-        LOGGER.info(f'Language detection accuracy: {language_accuracy:.2%}')
-        with open(os.path.join('output', 'language_accuracy.txt'), 'wt') as f:
-            f.write(f'Language detection accuracy: {language_accuracy:.2%}\n')
+        # language_accuracy = correct_count / len(data)
+        # LOGGER.info(f'Language detection accuracy: {language_accuracy:.2%}')
+        # with open(os.path.join('output', 'language_accuracy.txt'), 'wt') as f:
+        #     f.write(f'Language detection accuracy: {language_accuracy:.2%}\n')
 
         return preds
 
@@ -298,14 +323,15 @@ if __name__ == '__main__':
         print('Saving model')
         model.save(args.work_dir)
     elif args.mode == 'test':
-        start_time = time.time()
-        print('Loading model')
-        model = MyModel.load(args.work_dir)
-        print('Loading test data from {}'.format(args.test_data))
+        # print('Loading test data from {}'.format(args.test_data))
         test_data = MyModel.load_test_data(args.test_data)
-        print('Making predictions')
+        
+        start_time = time.time()
+        # print('Loading model')
+        model = MyModel.load(args.work_dir)
+        # print('Making predictions')
         pred = model.run_pred(test_data)
-        print('Writing predictions to {}'.format(args.test_output))
+        # print('Writing predictions to {}'.format(args.test_output))
         assert len(pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(pred))
         model.write_pred(pred, args.test_output)
         elapsed_time = time.time() - start_time
